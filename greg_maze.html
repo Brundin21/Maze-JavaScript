@@ -1,0 +1,341 @@
+<html>
+<head>
+<title>Greg's Gambits | Greg's Maze</title>
+<link href="greg.css" rel="stylesheet" type="text/css" />
+<script type = "text/javascript">
+    
+    //************Global Variables************
+    //set the size of the maze
+    var Columns = 8;
+    var Rows = 8;
+    var WallRate = .35; //Set the odds of a tile being a wall.
+                        //CAUTION script keeps generating mazes until a valid mazes is created
+                        //may hang up if set too high
+    var showWalls = false;      //used for testing
+    
+    var grid = new Array(Rows);
+    var maze = new Array();
+    
+    //For Pathfinding
+    var spotGrid = new Array(Rows);
+    var start;
+    var end;
+    var openSet = new Array();  //set of possible "steps" to the exit
+    var closedSet = new Array();    //set of steps that have been evaluated
+    
+    //Object to represent each spot in the grid, needed for pathfinding to ensure a path to the exit exists
+    function Spot(row, col, isWall){
+        this.row = row;
+        this.col = col;
+        this.neighbors;  //neighbors of this spot
+        this.wall = isWall;
+        
+        this.populateNeightbors = function(){
+            this.neighbors = new Array();
+            
+            //add top neighbor
+            if(row > 0){
+                if(!spotGrid[this.row -1][this.col].wall){
+                    this.neighbors.push(spotGrid[this.row - 1][this.col]);
+                }
+            }
+                
+            //add bottom neighbor
+            if(row < Rows-1){
+                if(!spotGrid[this.row + 1][this.col].wall){
+                    this.neighbors.push(spotGrid[this.row + 1][this.col]);
+                }
+            }
+            
+            //add left neighbor
+            if(col > 0){
+                if(!spotGrid[this.row][this.col - 1].wall){
+                    this.neighbors.push(spotGrid[this.row][this.col - 1]);
+                }
+            }
+                
+            //add right neighbor
+            if(col < Columns - 1){
+                if(!spotGrid[this.row][this.col + 1].wall){
+                    this.neighbors.push(spotGrid[this.row][this.col + 1]);
+                }
+            }
+        }
+    }
+    
+    
+    function setup()
+    {   
+        document.getElementById("table").innerHTML = "";
+        
+        //Initializing the arrays
+        for (var i = 0; i < Rows; i++){
+            grid[i] = new Array(Columns);
+            spotGrid[i] = new Array(Columns);
+            
+        }
+        
+        console.log(spotGrid);
+        
+        //***************create the table***************
+        var tableLoc = document.getElementById("table")
+        var table = document.createElement('table');
+        var tbody = document.createElement('tbody');
+        
+        for(i = 0; i < Rows; i++){
+            var row = document.createElement('tr');
+            
+            for (var j = 0; j < Columns; j++){
+                row.innerHTML = row.innerHTML + "<td onclick='move(" + i + "," + j + ")' ><img src='images/maze_images/black.png'></td>";
+            }
+            tbody.appendChild(row);
+        }
+        
+        table.appendChild(tbody);
+        tableLoc.appendChild(table);
+                
+        //***************Create a 2D array reference for each image in the maze***************        
+        var temp = document.getElementById('table').getElementsByTagName('tr'); //temp is each row in the maze
+        
+        for(i = 0; i < temp.length; i++){
+            maze[i] = temp[i].getElementsByTagName('img');
+        }
+       
+        //***************Populate the maze with obstacles, the hero, and the exit***************
+        for(var row = 0; row < Rows; row++){
+            for( var col = 0; col < Columns; col++){
+                if((row == 0 && col == 0) || (row == (Rows-1) && col == (Columns-1))) {
+                    continue;
+                }
+                
+                if(Math.random() < WallRate){   //chance a grid tile is an obstacle
+                    grid[row][col] = 0; //0 is an obstacle
+                    if(showWalls){
+                        maze[row][col].src = "images/maze_images/wall.png";  //For testing
+                    }
+                }else{
+                    grid[row][col] = 1; //1 is an open path
+                }
+                
+            }
+        }
+        
+        grid[0][0] = 2; //2 is the hero
+        maze[0][0].src = "images/maze_images/hero.png"; //Set the hero image
+        
+        grid[Rows-1][Columns-1] = 3; //3 is the end point
+        maze[Rows-1][Columns-1].src = "images/maze_images/exit.png";   //add the chest at the end of the maze
+        
+        //***************Pathfinding Procedures***************
+        //Doing this to determine if there is a path to the exit
+        //Need to find a more efficient way of doing this.
+        
+        //populate the spotGrid with Spots
+        for(var row = 0; row < Rows; row++){
+            for( var col = 0; col < Columns; col++){
+                                
+                if(grid[row][col] == 0){ //is a wall
+                    spotGrid[row][col] = new Spot(row, col, true);                    
+                }else{
+                    spotGrid[row][col] = new Spot(row, col, false);
+                }                
+            }
+        }
+        
+        //find the neighbors of each spot
+        for(var row = 0; row < Rows; row++){
+            for( var col = 0; col < Columns; col++){
+                current = spotGrid[row][col];
+                current.populateNeightbors();
+            }
+        }
+        
+        start = spotGrid[0][0];
+        end = spotGrid[Rows-1][Columns-1];
+        
+        openSet.push(start);    //first "step" to evaluate
+        
+        if(!isValidMaze()){     //if we dont have a valid maze, try again
+            setup();
+        }
+        
+    }
+    
+    function isValidMaze(){
+        /*
+        This is a much simplified version of A*
+        1) Start at the start spot.
+        2) Add it's neighbors to the openSet. (only non-wall spots can be neighbors)
+        3) Move the start spot from the openSet to the closedSet
+        4) Check a neighboring spot to see if it's the end.  If it's not the end spot, add any neighboring spots that aren't 
+             already in the closedSet to the openSet. Move this spot from the openSet to the closedSet.
+        5) Check another spot in the openSet
+        
+        openSet holds the spots to check.  If ever the end spot makes it into the openSet, then we have a valid maze.
+        closeSet holds the spots that have already been checked.
+        */
+                
+        
+        //loop around until all possible spots have been evaluated
+        while(openSet.length > 0){
+            for(var i = 0; i < openSet.length; i++){
+                var current = openSet[i];
+                
+                //console.log("[" + current.row + "," + current.col + "]");
+                
+                if(current == end){  //we got to the end, valid maze
+                    return true;
+                }
+                
+                closedSet.push(current);
+                removeFromArray(openSet, current);
+                
+                var neighbor = current.neighbors;
+                
+                for(var i = 0; i < neighbor.length; i++){
+                    if(neighbor[i] == end){ //we reached the end, valid maze
+                        return true;
+                    }
+                    
+                    if(!closedSet.includes(neighbor[i])){   //if the spot hasn't been evaluated
+                        openSet.push(neighbor[i]);          //add it to the openSet
+                    }
+                }
+            }
+        }
+        
+        return false;   //Out of moves, not a valid maze
+    }
+    
+    //function to remove an element from an array
+    function removeFromArray(arr, elm){
+        for(var i = arr.length - 1; i >= 0; i--){
+            if(arr[i] == elm){
+                arr.splice(i, 1);
+            }
+        }
+    }
+    
+    function move(r, c){
+        //0: blocked, 1: open path, 2: the hero, 3: the end 
+        
+        var movedFrom = isValidMove(r,c);
+        console.log(movedFrom);
+        
+        if(movedFrom != ""){
+            switch(grid[r][c]){     //what tile did the user click
+                case 0: //wall
+                    maze[r][c].src = "images/maze_images/wall.png";
+                    break;
+                case 1: //open
+                    grid[r][c] = 2;
+                    maze[r][c].src = "images/maze_images/hero.png";
+                    switch(movedFrom){
+                        case "U":
+                            grid[r-1][c] = 1;
+                            maze[r-1][c].src = "images/maze_images/tile.png";
+                            console.log(movedFrom);
+                            break;
+                        case "D":
+                            grid[r+1][c] = 1;
+                            maze[r+1][c].src = "images/maze_images/tile.png";
+                            console.log(movedFrom);
+                            break;
+                        case "L":
+                            grid[r][c-1] = 1;
+                            maze[r][c-1].src = "images/maze_images/tile.png";
+                            console.log(movedFrom);
+                            break;
+                        case "R":
+                            grid[r][c+1] = 1;
+                            maze[r][c+1].src = "images/maze_images/tile.png";
+                            console.log(movedFrom);
+                            break;
+                    }
+                    break;
+                case 2: //hero
+                    break;
+                case 3: //end
+                    alert("Congratulations! You reached the exit!");
+                    if(window.prompt("Play again?", "yes")){
+                        setup();
+                    }
+                    break;
+
+            }
+        }
+    }
+    
+    function isValidMove(r, c){        
+        //look to see from which direction the hero is moving into the tile
+        //check up
+        if(r > 0){  
+            if(grid[r-1][c] == 2){
+                return "U";
+            }
+        }
+        //check down
+        if(r < (Rows-1)){ 
+            if(grid[r+1][c] == 2){
+                return "D";
+            }
+        }
+        //check left
+        if(c > 0){ 
+            if(grid[r][c-1] == 2){
+                return "L";
+            }
+        }
+        //check right
+        if(c < (Columns-1)){  
+            if(grid[r][c+1] == 2){
+                return "R";
+            }
+        }
+        
+        return "";  //not a valid move
+        
+    }
+    
+	
+</script>
+
+<style type="text/css">
+    #table{
+        table-layout: fixed;
+        width: auto;
+    }
+    
+    #table td{
+        border-color: black;
+        height: 50px;
+        max-width: 50px;
+    }
+</style>
+</head>
+<body onload ="setup();">
+<div id="container">
+<img src="images/superhero.jpg" class="floatleft" />
+<h1 id="logo"><em>Greg's Maze</em></h1>
+<p>&nbsp;</p>
+<p>&nbsp;</p>
+<div id="nav">
+  <p><a href="index.html">Home</a>
+  <a href="greg.html">About Greg</a>
+  <a href="play_games.html">Play a Game</a>
+  <a href="sign.html">Sign In</a>
+  <a href="contact.html">Contact Us</a></p>
+</div>
+<div id="content" style="width: 600px; margin-left: auto; margin-right: auto;">
+<p><input type="button" value = "Reset" onclick="setup();" /></p>
+<p>You have just woken up in a dark dungeon.  How you got there is a mystery.  All you have with you is the clothes on your back.  Fumble your way through the darkness untill you reach the exit.</p>
+
+<div id="table" width = "90%" align = "center">
+    
+</div>
+</div>
+<div id="footer">Copyright &copy; 2013 Greg's Gambits<br />
+<a href="mailto:Juan@Leon.com">
+yourfirstname@yourlastname.com</a></div>
+</div>
+</body></html>
